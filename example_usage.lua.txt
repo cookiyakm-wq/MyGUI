@@ -1,0 +1,176 @@
+--[[
+	Пример использования Mobile UI Library
+	
+	Демонстрирует все возможности библиотеки на мобильных устройствах
+--]]
+
+-- Подключаем библиотеку
+local MobileUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/cookiyakm-wq/MyGUI/refs/heads/main/mobile_ui_library.lua.txt"))() -- Замените на свой URL
+-- Или если файл локально: local MobileUI = require(script.MobileUILibrary)
+
+-- Создаём главное окно
+local MainWindow = MobileUI:CreateWindow("Мобильное Меню", {
+	main_color = Color3.fromRGB(10, 132, 255) -- iOS синий цвет
+})
+
+-- Создаём вкладки
+local HomeTab = MainWindow:AddTab("Главная")
+local SettingsTab = MainWindow:AddTab("Настройки")
+local AboutTab = MainWindow:AddTab("О программе")
+
+-- ============================================
+-- ВКЛАДКА "ГЛАВНАЯ"
+-- ============================================
+
+HomeTab:AddLabel("👋 Добро пожаловать!")
+
+HomeTab:AddButton("Нажми меня!", function()
+	print("Кнопка нажата!")
+	-- Здесь ваш код
+end)
+
+HomeTab:AddSeparator()
+
+local toggle = HomeTab:AddToggle("Включить функцию", function(state)
+	print("Переключатель:", state)
+	if state then
+		print("Функция включена")
+	else
+		print("Функция выключена")
+	end
+end, false) -- false = выключен по умолчанию
+
+HomeTab:AddSeparator()
+
+local slider = HomeTab:AddSlider("Скорость", function(value)
+	print("Значение слайдера:", value)
+	-- Здесь можно менять скорость ходьбы, FOV и т.д.
+end, {
+	min = 0,
+	max = 100,
+	default = 50
+})
+
+HomeTab:AddSeparator()
+
+-- Текстовое поле
+local textbox = HomeTab:AddTextBox("Введите имя", function(text)
+	print("Введённый текст:", text)
+end)
+
+-- ============================================
+-- ВКЛАДКА "НАСТРОЙКИ"
+-- ============================================
+
+-- Папка с настройками графики
+local GraphicsFolder = SettingsTab:AddFolder("🎨 Графика")
+
+GraphicsFolder:AddToggle("Тени", function(state)
+	-- Включение/выключение теней
+	game:GetService("Lighting").GlobalShadows = state
+end, true)
+
+GraphicsFolder:AddToggle("Блики", function(state)
+	-- Включение/выключение бликов
+	game:GetService("Lighting").EnvironmentSpecularScale = state and 1 or 0
+end, true)
+
+local brightnessSlider = GraphicsFolder:AddSlider("Яркость", function(value)
+	game:GetService("Lighting").Brightness = value / 50
+end, {
+	min = 0,
+	max = 100,
+	default = 50
+})
+
+SettingsTab:AddSeparator()
+
+-- Папка с настройками звука
+local AudioFolder = SettingsTab:AddFolder("🔊 Звук")
+
+local volumeSlider = AudioFolder:AddSlider("Громкость", function(value)
+	game:GetService("SoundService").Volume = value / 100
+end, {
+	min = 0,
+	max = 100,
+	default = 50
+})
+
+AudioFolder:AddToggle("Музыка", function(state)
+	-- Включение/выключение фоновой музыки
+	print("Музыка:", state)
+end, true)
+
+SettingsTab:AddSeparator()
+
+-- Dropdown пример
+local themeDropdown = SettingsTab:AddDropdown("Тема", function(selected)
+	print("Выбрана тема:", selected)
+	-- Здесь можно менять тему UI
+end, {
+	items = {"Тёмная", "Светлая", "Синяя", "Красная"}
+})
+
+-- ============================================
+-- ВКЛАДКА "О ПРОГРАММЕ"
+-- ============================================
+
+AboutTab:AddLabel("📱 Mobile UI Library v2.0")
+AboutTab:AddSeparator()
+AboutTab:AddLabel("Полностью адаптировано")
+AboutTab:AddLabel("для мобильных устройств")
+AboutTab:AddSeparator()
+AboutTab:AddLabel("Возможности:")
+AboutTab:AddLabel("✓ Тач-управление")
+AboutTab:AddLabel("✓ Свайпы и жесты")
+AboutTab:AddLabel("✓ Адаптивные размеры")
+AboutTab:AddLabel("✓ Виртуальная клавиатура")
+AboutTab:AddLabel("✓ Плавные анимации")
+
+AboutTab:AddSeparator()
+
+AboutTab:AddButton("Открыть Discord", function()
+	-- Здесь можно открыть ссылку или показать информацию
+	print("Открытие Discord...")
+end)
+
+-- ============================================
+-- ПОКАЗЫВАЕМ ОКНО
+-- ============================================
+
+-- Показать окно при загрузке
+MainWindow:Show()
+
+-- Примеры дополнительного управления:
+
+-- Скрыть окно через 10 секунд
+--[[
+wait(10)
+MainWindow:Hide()
+--]]
+
+-- Переключить видимость (показать/скрыть)
+--[[
+MainWindow:Toggle()
+--]]
+
+-- Программное изменение значений
+--[[
+slider:Set(75) -- установить значение слайдера
+toggle:Set(true) -- включить переключатель
+textbox:Set("Новый текст") -- установить текст
+--]]
+
+-- Получение значений
+--[[
+local currentSliderValue = slider:Get()
+local isToggleOn = toggle:Get()
+local textContent = textbox:Get()
+print("Слайдер:", currentSliderValue)
+print("Переключатель:", isToggleOn)
+print("Текст:", textContent)
+--]]
+
+print("✅ Мобильный UI загружен успешно!")
+print("📱 Проведите пальцем вниз по заголовку окна, чтобы закрыть")
+print("❌ Нажмите на красную кнопку, чтобы закрыть окно")
