@@ -1,0 +1,968 @@
+--[[
+	mobile-ui-library
+	version 2.0
+	Полностью адаптированная версия для мобильных устройств
+	
+	Особенности:
+	- Тач-управление (свайпы, тапы, долгие нажатия)
+	- Адаптивные размеры под разные экраны
+	- Крупные элементы для удобного нажатия
+	- Поддержка виртуальной клавиатуры
+	- Жесты для открытия/закрытия окон
+	- Оптимизация для производительности на мобильных
+--]]
+
+-- Сервисы
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+
+-- Проверка на мобильное устройство
+local function isMobile()
+	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+end
+
+if not isMobile() then
+	warn("⚠️ Эта библиотека предназначена только для мобильных устройств!")
+end
+
+-- Получение размера экрана
+local screenSize = workspace.CurrentCamera.ViewportSize
+local screenWidth = screenSize.X
+local screenHeight = screenSize.Y
+
+-- Конфигурация для мобильных устройств
+local MobileConfig = {
+	-- Размеры адаптивные под экран
+	window_width_percent = 0.9, -- 90% ширины экрана
+	window_max_width = 450,
+	window_min_height = 300,
+	
+	-- Минимальные размеры для тач-элементов (рекомендация Apple/Google: 44-48px)
+	min_touch_size = 48,
+	button_height = 50,
+	slider_height = 50,
+	toggle_size = 60,
+	
+	-- Отступы
+	padding = 12,
+	element_spacing = 10,
+	
+	-- Цвета (темная тема для мобильных)
+	colors = {
+		background = Color3.fromRGB(18, 18, 18),
+		surface = Color3.fromRGB(28, 28, 30),
+		primary = Color3.fromRGB(10, 132, 255),
+		secondary = Color3.fromRGB(48, 48, 51),
+		text = Color3.fromRGB(255, 255, 255),
+		text_secondary = Color3.fromRGB(160, 160, 160),
+		success = Color3.fromRGB(52, 199, 89),
+		danger = Color3.fromRGB(255, 59, 48),
+		border = Color3.fromRGB(58, 58, 60),
+	},
+	
+	-- Анимации
+	tween_time = 0.3,
+	tween_style = Enum.EasingStyle.Quint,
+	tween_direction = Enum.EasingDirection.Out,
+	
+	-- Жесты
+	swipe_threshold = 50, -- минимальная дистанция для свайпа
+	long_press_time = 0.5, -- время для долгого нажатия
+	double_tap_time = 0.3, -- время между тапами для двойного тапа
+}
+
+-- Утилиты
+local Utils = {}
+
+function Utils:Tween(object, properties, time, callback)
+	local tweenInfo = TweenInfo.new(
+		time or MobileConfig.tween_time,
+		MobileConfig.tween_style,
+		MobileConfig.tween_direction
+	)
+	local tween = TweenService:Create(object, tweenInfo, properties)
+	tween:Play()
+	
+	if callback then
+		tween.Completed:Connect(callback)
+	end
+	
+	return tween
+end
+
+function Utils:CreateRoundedFrame(parent, bgColor, size, position)
+	local frame = Instance.new("Frame")
+	frame.BackgroundColor3 = bgColor
+	frame.BorderSizePixel = 0
+	frame.Size = size or UDim2.new(1, 0, 1, 0)
+	frame.Position = position or UDim2.new(0, 0, 0, 0)
+	frame.Parent = parent
+	
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = frame
+	
+	return frame
+end
+
+function Utils:CreateText(parent, text, size, color, font, alignment)
+	local label = Instance.new("TextLabel")
+	label.Text = text
+	label.TextSize = size or 16
+	label.TextColor3 = color or MobileConfig.colors.text
+	label.Font = font or Enum.Font.GothamMedium
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.new(1, 0, 1, 0)
+	label.TextXAlignment = alignment or Enum.TextXAlignment.Left
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.Parent = parent
+	
+	return label
+end
+
+function Utils:CreateIcon(parent, iconId, size)
+	local icon = Instance.new("ImageLabel")
+	icon.Image = iconId
+	icon.BackgroundTransparency = 1
+	icon.Size = size or UDim2.new(0, 24, 0, 24)
+	icon.Parent = parent
+	
+	return icon
+end
+
+function Utils:AddPadding(parent, padding)
+	local uiPadding = Instance.new("UIPadding")
+	uiPadding.PaddingTop = UDim.new(0, padding or MobileConfig.padding)
+	uiPadding.PaddingBottom = UDim.new(0, padding or MobileConfig.padding)
+	uiPadding.PaddingLeft = UDim.new(0, padding or MobileConfig.padding)
+	uiPadding.PaddingRight = UDim.new(0, padding or MobileConfig.padding)
+	uiPadding.Parent = parent
+	
+	return uiPadding
+end
+
+function Utils:CreateListLayout(parent, padding)
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, padding or MobileConfig.element_spacing)
+	layout.Parent = parent
+	
+	return layout
+end
+
+-- Обработчик тач-событий
+local TouchHandler = {}
+TouchHandler.__index = TouchHandler
+
+function TouchHandler.new(object)
+	local self = setmetatable({}, TouchHandler)
+	self.object = object
+	self.touching = false
+	self.touchStart = nil
+	self.touchStartTime = 0
+	self.lastTapTime = 0
+	
+	self.onTap = nil
+	self.onDoubleTap = nil
+	self.onLongPress = nil
+	self.onSwipeUp = nil
+	self.onSwipeDown = nil
+	self.onSwipeLeft = nil
+	self.onSwipeRight = nil
+	
+	self:setupEvents()
+	
+	return self
+end
+
+function TouchHandler:setupEvents()
+	self.object.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then
+			self.touching = true
+			self.touchStart = input.Position
+			self.touchStartTime = tick()
+			
+			-- Проверка на долгое нажатие
+			spawn(function()
+				wait(MobileConfig.long_press_time)
+				if self.touching and self.onLongPress then
+					self.onLongPress()
+				end
+			end)
+		end
+	end)
+	
+	self.object.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch and self.touching then
+			self.touching = false
+			local touchEnd = input.Position
+			local touchTime = tick() - self.touchStartTime
+			
+			-- Вычисление дистанции свайпа
+			local deltaX = touchEnd.X - self.touchStart.X
+			local deltaY = touchEnd.Y - self.touchStart.Y
+			local distance = math.sqrt(deltaX^2 + deltaY^2)
+			
+			-- Если это свайп
+			if distance > MobileConfig.swipe_threshold then
+				local angle = math.atan2(deltaY, deltaX)
+				
+				if angle > -math.pi/4 and angle < math.pi/4 then
+					-- Свайп вправо
+					if self.onSwipeRight then self.onSwipeRight() end
+				elseif angle > math.pi/4 and angle < 3*math.pi/4 then
+					-- Свайп вниз
+					if self.onSwipeDown then self.onSwipeDown() end
+				elseif angle < -math.pi/4 and angle > -3*math.pi/4 then
+					-- Свайп вверх
+					if self.onSwipeUp then self.onSwipeUp() end
+				else
+					-- Свайп влево
+					if self.onSwipeLeft then self.onSwipeLeft() end
+				end
+			else
+				-- Это тап
+				local timeSinceLastTap = tick() - self.lastTapTime
+				
+				if timeSinceLastTap < MobileConfig.double_tap_time then
+					-- Двойной тап
+					if self.onDoubleTap then self.onDoubleTap() end
+					self.lastTapTime = 0
+				else
+					-- Одинарный тап
+					if self.onTap then self.onTap() end
+					self.lastTapTime = tick()
+				end
+			end
+		end
+	end)
+end
+
+-- Главная библиотека
+local MobileUI = {}
+MobileUI.__index = MobileUI
+
+-- Удаление старого UI если существует
+local oldUI = CoreGui:FindFirstChild("MobileUI")
+if oldUI then oldUI:Destroy() end
+
+-- Создание главного контейнера
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "MobileUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = CoreGui
+
+local windowContainer = Instance.new("Frame")
+windowContainer.Name = "WindowContainer"
+windowContainer.BackgroundTransparency = 1
+windowContainer.Size = UDim2.new(1, 0, 1, 0)
+windowContainer.Parent = screenGui
+
+-- Создание окна
+function MobileUI:CreateWindow(title, options)
+	local windowData = {}
+	options = options or {}
+	
+	-- Вычисление размеров окна
+	local windowWidth = math.min(screenWidth * MobileConfig.window_width_percent, MobileConfig.window_max_width)
+	local windowHeight = screenHeight * 0.7
+	
+	-- Главный контейнер окна
+	local window = Instance.new("Frame")
+	window.Name = "Window"
+	window.BackgroundTransparency = 1
+	window.Size = UDim2.new(0, windowWidth, 0, windowHeight)
+	window.Position = UDim2.new(0.5, -windowWidth/2, 0.5, -windowHeight/2)
+	window.ClipsDescendants = false
+	window.Visible = false
+	window.Parent = windowContainer
+	
+	-- Фон окна
+	local background = Utils:CreateRoundedFrame(window, MobileConfig.colors.background, UDim2.new(1, 0, 1, 0))
+	background.ZIndex = 1
+	
+	-- Тень
+	local shadow = Instance.new("ImageLabel")
+	shadow.Name = "Shadow"
+	shadow.BackgroundTransparency = 1
+	shadow.Size = UDim2.new(1, 40, 1, 40)
+	shadow.Position = UDim2.new(0, -20, 0, -20)
+	shadow.Image = "rbxasset://textures/ui/GuiImagePlaceholder.png"
+	shadow.ImageColor3 = Color3.new(0, 0, 0)
+	shadow.ImageTransparency = 0.7
+	shadow.ZIndex = 0
+	shadow.Parent = window
+	
+	-- Хедер
+	local header = Instance.new("Frame")
+	header.Name = "Header"
+	header.BackgroundColor3 = MobileConfig.colors.surface
+	header.BorderSizePixel = 0
+	header.Size = UDim2.new(1, 0, 0, 60)
+	header.ZIndex = 2
+	header.Parent = background
+	
+	local headerCorner = Instance.new("UICorner")
+	headerCorner.CornerRadius = UDim.new(0, 12)
+	headerCorner.Parent = header
+	
+	-- Убираем скругление снизу хедера
+	local headerBottomCover = Instance.new("Frame")
+	headerBottomCover.BackgroundColor3 = MobileConfig.colors.surface
+	headerBottomCover.BorderSizePixel = 0
+	headerBottomCover.Size = UDim2.new(1, 0, 0, 12)
+	headerBottomCover.Position = UDim2.new(0, 0, 1, -12)
+	headerBottomCover.ZIndex = 2
+	headerBottomCover.Parent = header
+	
+	-- Заголовок
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Name = "Title"
+	titleLabel.Text = title or "Mobile UI"
+	titleLabel.TextSize = 20
+	titleLabel.TextColor3 = MobileConfig.colors.text
+	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Size = UDim2.new(1, -80, 1, 0)
+	titleLabel.Position = UDim2.new(0, 20, 0, 0)
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.TextYAlignment = Enum.TextYAlignment.Center
+	titleLabel.ZIndex = 3
+	titleLabel.Parent = header
+	
+	-- Кнопка закрытия
+	local closeButton = Utils:CreateRoundedFrame(header, MobileConfig.colors.danger, 
+		UDim2.new(0, 40, 0, 40), UDim2.new(1, -50, 0.5, -20))
+	closeButton.ZIndex = 3
+	
+	local closeIcon = Utils:CreateText(closeButton, "✕", 24, MobileConfig.colors.text, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+	closeIcon.TextYAlignment = Enum.TextYAlignment.Center
+	
+	-- Индикатор для свайпа вниз
+	local swipeIndicator = Utils:CreateRoundedFrame(header, MobileConfig.colors.border,
+		UDim2.new(0, 40, 0, 5), UDim2.new(0.5, -20, 0, 10))
+	swipeIndicator.ZIndex = 3
+	
+	-- Контейнер для вкладок
+	local tabContainer = Instance.new("Frame")
+	tabContainer.Name = "TabContainer"
+	tabContainer.BackgroundTransparency = 1
+	tabContainer.Size = UDim2.new(1, 0, 0, 50)
+	tabContainer.Position = UDim2.new(0, 0, 0, 60)
+	tabContainer.ZIndex = 2
+	tabContainer.Parent = background
+	
+	local tabLayout = Utils:CreateListLayout(tabContainer, 0)
+	tabLayout.FillDirection = Enum.FillDirection.Horizontal
+	Utils:AddPadding(tabContainer, 10)
+	
+	-- Контент
+	local contentContainer = Instance.new("ScrollingFrame")
+	contentContainer.Name = "Content"
+	contentContainer.BackgroundTransparency = 1
+	contentContainer.Size = UDim2.new(1, 0, 1, -110)
+	contentContainer.Position = UDim2.new(0, 0, 0, 110)
+	contentContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+	contentContainer.ScrollBarThickness = 6
+	contentContainer.ScrollBarImageColor3 = MobileConfig.colors.primary
+	contentContainer.BorderSizePixel = 0
+	contentContainer.ZIndex = 2
+	contentContainer.Parent = background
+	
+	Utils:AddPadding(contentContainer, MobileConfig.padding)
+	
+	-- Обработчики жестов для окна
+	local windowTouch = TouchHandler.new(header)
+	
+	-- Свайп вниз для закрытия
+	windowTouch.onSwipeDown = function()
+		windowData:Hide()
+	end
+	
+	-- Тап на кнопку закрытия
+	local closeTouch = TouchHandler.new(closeButton)
+	closeTouch.onTap = function()
+		windowData:Hide()
+	end
+	
+	-- Табы
+	local tabs = {}
+	local currentTab = nil
+	
+	function windowData:AddTab(tabName)
+		local tabData = {}
+		
+		-- Кнопка таба
+		local tabButton = Utils:CreateRoundedFrame(tabContainer, MobileConfig.colors.secondary,
+			UDim2.new(0, 100, 1, 0))
+		tabButton.ZIndex = 3
+		
+		local tabLabel = Utils:CreateText(tabButton, tabName, 16, MobileConfig.colors.text_secondary, 
+			Enum.Font.GothamMedium, Enum.TextXAlignment.Center)
+		tabLabel.TextYAlignment = Enum.TextYAlignment.Center
+		
+		-- Контейнер содержимого таба
+		local tabContent = Instance.new("Frame")
+		tabContent.Name = tabName
+		tabContent.BackgroundTransparency = 1
+		tabContent.Size = UDim2.new(1, 0, 0, 0)
+		tabContent.Visible = false
+		tabContent.Parent = contentContainer
+		
+		local tabLayout = Utils:CreateListLayout(tabContent, MobileConfig.element_spacing)
+		
+		-- Автообновление размера канваса
+		tabLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+			tabContent.Size = UDim2.new(1, 0, 0, tabLayout.AbsoluteContentSize.Y)
+			contentContainer.CanvasSize = UDim2.new(0, 0, 0, tabLayout.AbsoluteContentSize.Y + MobileConfig.padding * 2)
+		end)
+		
+		-- Обработчик переключения таба
+		local tabTouch = TouchHandler.new(tabButton)
+		tabTouch.onTap = function()
+			-- Скрыть все табы
+			for _, tab in pairs(tabs) do
+				tab.button.BackgroundColor3 = MobileConfig.colors.secondary
+				tab.label.TextColor3 = MobileConfig.colors.text_secondary
+				tab.content.Visible = false
+			end
+			
+			-- Показать текущий таб
+			tabButton.BackgroundColor3 = MobileConfig.colors.primary
+			tabLabel.TextColor3 = MobileConfig.colors.text
+			tabContent.Visible = true
+			currentTab = tabData
+		end
+		
+		-- Добавить в список табов
+		table.insert(tabs, {
+			button = tabButton,
+			label = tabLabel,
+			content = tabContent,
+			data = tabData
+		})
+		
+		-- Если это первый таб, активировать его
+		if #tabs == 1 then
+			tabButton.BackgroundColor3 = MobileConfig.colors.primary
+			tabLabel.TextColor3 = MobileConfig.colors.text
+			tabContent.Visible = true
+			currentTab = tabData
+		end
+		
+		-- Методы добавления элементов
+		
+		-- Лейбл
+		function tabData:AddLabel(text)
+			local labelContainer = Instance.new("Frame")
+			labelContainer.BackgroundTransparency = 1
+			labelContainer.Size = UDim2.new(1, 0, 0, 30)
+			labelContainer.Parent = tabContent
+			
+			local label = Utils:CreateText(labelContainer, text, 16, MobileConfig.colors.text, Enum.Font.GothamMedium)
+			
+			return labelContainer
+		end
+		
+		-- Кнопка
+		function tabData:AddButton(text, callback)
+			local buttonContainer = Utils:CreateRoundedFrame(tabContent, MobileConfig.colors.primary,
+				UDim2.new(1, 0, 0, MobileConfig.button_height))
+			
+			local buttonLabel = Utils:CreateText(buttonContainer, text, 18, MobileConfig.colors.text, 
+				Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+			buttonLabel.TextYAlignment = Enum.TextYAlignment.Center
+			
+			local buttonTouch = TouchHandler.new(buttonContainer)
+			buttonTouch.onTap = function()
+				-- Анимация нажатия
+				Utils:Tween(buttonContainer, {BackgroundColor3 = MobileConfig.colors.secondary}, 0.1, function()
+					Utils:Tween(buttonContainer, {BackgroundColor3 = MobileConfig.colors.primary}, 0.1)
+				end)
+				
+				if callback then callback() end
+			end
+			
+			return buttonContainer
+		end
+		
+		-- Переключатель (Toggle/Switch)
+		function tabData:AddToggle(text, callback, defaultValue)
+			local toggleContainer = Utils:CreateRoundedFrame(tabContent, MobileConfig.colors.surface,
+				UDim2.new(1, 0, 0, MobileConfig.toggle_size))
+			
+			Utils:AddPadding(toggleContainer, MobileConfig.padding)
+			
+			local toggleLabel = Instance.new("TextLabel")
+			toggleLabel.Text = text
+			toggleLabel.TextSize = 16
+			toggleLabel.TextColor3 = MobileConfig.colors.text
+			toggleLabel.Font = Enum.Font.GothamMedium
+			toggleLabel.BackgroundTransparency = 1
+			toggleLabel.Size = UDim2.new(1, -80, 1, 0)
+			toggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+			toggleLabel.TextYAlignment = Enum.TextYAlignment.Center
+			toggleLabel.Parent = toggleContainer
+			
+			-- Свитч
+			local switchBg = Utils:CreateRoundedFrame(toggleContainer, MobileConfig.colors.secondary,
+				UDim2.new(0, 60, 0, 32), UDim2.new(1, -60, 0.5, -16))
+			switchBg.ZIndex = 3
+			
+			local switchKnob = Utils:CreateRoundedFrame(switchBg, MobileConfig.colors.text,
+				UDim2.new(0, 28, 0, 28), UDim2.new(0, 2, 0, 2))
+			switchKnob.ZIndex = 4
+			
+			local isOn = defaultValue or false
+			
+			local function updateToggle(animated)
+				if isOn then
+					if animated then
+						Utils:Tween(switchBg, {BackgroundColor3 = MobileConfig.colors.success}, 0.2)
+						Utils:Tween(switchKnob, {Position = UDim2.new(1, -30, 0, 2)}, 0.2)
+					else
+						switchBg.BackgroundColor3 = MobileConfig.colors.success
+						switchKnob.Position = UDim2.new(1, -30, 0, 2)
+					end
+				else
+					if animated then
+						Utils:Tween(switchBg, {BackgroundColor3 = MobileConfig.colors.secondary}, 0.2)
+						Utils:Tween(switchKnob, {Position = UDim2.new(0, 2, 0, 2)}, 0.2)
+					else
+						switchBg.BackgroundColor3 = MobileConfig.colors.secondary
+						switchKnob.Position = UDim2.new(0, 2, 0, 2)
+					end
+				end
+			end
+			
+			updateToggle(false)
+			
+			local switchTouch = TouchHandler.new(switchBg)
+			switchTouch.onTap = function()
+				isOn = not isOn
+				updateToggle(true)
+				if callback then callback(isOn) end
+			end
+			
+			-- Методы управления
+			local toggleData = {}
+			function toggleData:Set(value)
+				isOn = value
+				updateToggle(true)
+			end
+			
+			function toggleData:Get()
+				return isOn
+			end
+			
+			return toggleData, toggleContainer
+		end
+		
+		-- Слайдер
+		function tabData:AddSlider(text, callback, options)
+			options = options or {}
+			local minValue = options.min or 0
+			local maxValue = options.max or 100
+			local currentValue = options.default or minValue
+			
+			local sliderContainer = Utils:CreateRoundedFrame(tabContent, MobileConfig.colors.surface,
+				UDim2.new(1, 0, 0, MobileConfig.slider_height + 30))
+			
+			Utils:AddPadding(sliderContainer, MobileConfig.padding)
+			
+			-- Заголовок и значение
+			local titleLabel = Instance.new("TextLabel")
+			titleLabel.Text = text
+			titleLabel.TextSize = 16
+			titleLabel.TextColor3 = MobileConfig.colors.text
+			titleLabel.Font = Enum.Font.GothamMedium
+			titleLabel.BackgroundTransparency = 1
+			titleLabel.Size = UDim2.new(0.7, 0, 0, 20)
+			titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+			titleLabel.Parent = sliderContainer
+			
+			local valueLabel = Instance.new("TextLabel")
+			valueLabel.Text = tostring(math.floor(currentValue))
+			valueLabel.TextSize = 18
+			valueLabel.TextColor3 = MobileConfig.colors.primary
+			valueLabel.Font = Enum.Font.GothamBold
+			valueLabel.BackgroundTransparency = 1
+			valueLabel.Size = UDim2.new(0.3, 0, 0, 20)
+			valueLabel.Position = UDim2.new(0.7, 0, 0, 0)
+			valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+			valueLabel.Parent = sliderContainer
+			
+			-- Трек слайдера
+			local track = Utils:CreateRoundedFrame(sliderContainer, MobileConfig.colors.secondary,
+				UDim2.new(1, 0, 0, 8), UDim2.new(0, 0, 0, 30))
+			track.ZIndex = 3
+			
+			-- Заполнение
+			local fill = Utils:CreateRoundedFrame(track, MobileConfig.colors.primary,
+				UDim2.new(0, 0, 1, 0))
+			fill.ZIndex = 4
+			
+			-- Кнопка слайдера
+			local knob = Utils:CreateRoundedFrame(sliderContainer, MobileConfig.colors.text,
+				UDim2.new(0, 32, 0, 32), UDim2.new(0, 0, 0, 22))
+			knob.ZIndex = 5
+			
+			local function updateSlider(value, animated)
+				value = math.clamp(value, minValue, maxValue)
+				currentValue = value
+				valueLabel.Text = tostring(math.floor(value))
+				
+				local percent = (value - minValue) / (maxValue - minValue)
+				local trackWidth = track.AbsoluteSize.X
+				local knobPos = UDim2.new(0, trackWidth * percent - 16, 0, 22)
+				local fillSize = UDim2.new(percent, 0, 1, 0)
+				
+				if animated then
+					Utils:Tween(knob, {Position = knobPos}, 0.1)
+					Utils:Tween(fill, {Size = fillSize}, 0.1)
+				else
+					knob.Position = knobPos
+					fill.Size = fillSize
+				end
+				
+				if callback then callback(value) end
+			end
+			
+			updateSlider(currentValue, false)
+			
+			-- Обработка касаний
+			local dragging = false
+			
+			track.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.Touch then
+					dragging = true
+					local relativeX = input.Position.X - track.AbsolutePosition.X
+					local percent = math.clamp(relativeX / track.AbsoluteSize.X, 0, 1)
+					local value = minValue + (maxValue - minValue) * percent
+					updateSlider(value, true)
+				end
+			end)
+			
+			track.InputChanged:Connect(function(input)
+				if dragging and input.UserInputType == Enum.UserInputType.Touch then
+					local relativeX = input.Position.X - track.AbsolutePosition.X
+					local percent = math.clamp(relativeX / track.AbsoluteSize.X, 0, 1)
+					local value = minValue + (maxValue - minValue) * percent
+					updateSlider(value, false)
+				end
+			end)
+			
+			track.InputEnded:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.Touch then
+					dragging = false
+				end
+			end)
+			
+			-- Методы управления
+			local sliderData = {}
+			function sliderData:Set(value)
+				updateSlider(value, true)
+			end
+			
+			function sliderData:Get()
+				return currentValue
+			end
+			
+			return sliderData, sliderContainer
+		end
+		
+		-- Текстовое поле
+		function tabData:AddTextBox(placeholder, callback, options)
+			options = options or {}
+			
+			local textBoxContainer = Utils:CreateRoundedFrame(tabContent, MobileConfig.colors.surface,
+				UDim2.new(1, 0, 0, MobileConfig.button_height))
+			
+			Utils:AddPadding(textBoxContainer, MobileConfig.padding)
+			
+			local textBox = Instance.new("TextBox")
+			textBox.PlaceholderText = placeholder or "Введите текст..."
+			textBox.Text = ""
+			textBox.TextSize = 16
+			textBox.TextColor3 = MobileConfig.colors.text
+			textBox.PlaceholderColor3 = MobileConfig.colors.text_secondary
+			textBox.Font = Enum.Font.GothamMedium
+			textBox.BackgroundTransparency = 1
+			textBox.Size = UDim2.new(1, 0, 1, 0)
+			textBox.TextXAlignment = Enum.TextXAlignment.Left
+			textBox.ClearTextOnFocus = options.clear or false
+			textBox.Parent = textBoxContainer
+			
+			textBox.FocusLost:Connect(function(enterPressed)
+				if callback and enterPressed then
+					callback(textBox.Text)
+				end
+			end)
+			
+			-- Методы управления
+			local textBoxData = {}
+			function textBoxData:Set(text)
+				textBox.Text = text
+			end
+			
+			function textBoxData:Get()
+				return textBox.Text
+			end
+			
+			return textBoxData, textBoxContainer
+		end
+		
+		-- Dropdown
+		function tabData:AddDropdown(text, callback, options)
+			options = options or {}
+			local items = options.items or {}
+			local selectedItem = nil
+			local isOpen = false
+			
+			local dropdownContainer = Instance.new("Frame")
+			dropdownContainer.BackgroundTransparency = 1
+			dropdownContainer.Size = UDim2.new(1, 0, 0, MobileConfig.button_height)
+			dropdownContainer.ClipsDescendants = false
+			dropdownContainer.Parent = tabContent
+			
+			-- Кнопка dropdown
+			local dropdownButton = Utils:CreateRoundedFrame(dropdownContainer, MobileConfig.colors.surface,
+				UDim2.new(1, 0, 0, MobileConfig.button_height))
+			
+			Utils:AddPadding(dropdownButton, MobileConfig.padding)
+			
+			local dropdownLabel = Instance.new("TextLabel")
+			dropdownLabel.Text = text
+			dropdownLabel.TextSize = 16
+			dropdownLabel.TextColor3 = MobileConfig.colors.text
+			dropdownLabel.Font = Enum.Font.GothamMedium
+			dropdownLabel.BackgroundTransparency = 1
+			dropdownLabel.Size = UDim2.new(1, -40, 1, 0)
+			dropdownLabel.TextXAlignment = Enum.TextXAlignment.Left
+			dropdownLabel.TextYAlignment = Enum.TextYAlignment.Center
+			dropdownLabel.Parent = dropdownButton
+			
+			-- Стрелка
+			local arrow = Utils:CreateText(dropdownButton, "▼", 16, MobileConfig.colors.text_secondary, 
+				Enum.Font.GothamBold, Enum.TextXAlignment.Right)
+			arrow.Size = UDim2.new(0, 30, 1, 0)
+			arrow.Position = UDim2.new(1, -30, 0, 0)
+			arrow.TextYAlignment = Enum.TextYAlignment.Center
+			
+			-- Список элементов
+			local itemsList = Instance.new("ScrollingFrame")
+			itemsList.BackgroundColor3 = MobileConfig.colors.surface
+			itemsList.BorderSizePixel = 0
+			itemsList.Size = UDim2.new(1, 0, 0, 0)
+			itemsList.Position = UDim2.new(0, 0, 0, MobileConfig.button_height + 5)
+			itemsList.CanvasSize = UDim2.new(0, 0, 0, 0)
+			itemsList.ScrollBarThickness = 4
+			itemsList.ScrollBarImageColor3 = MobileConfig.colors.primary
+			itemsList.Visible = false
+			itemsList.ZIndex = 10
+			itemsList.Parent = dropdownContainer
+			
+			local itemsCorner = Instance.new("UICorner")
+			itemsCorner.CornerRadius = UDim.new(0, 8)
+			itemsCorner.Parent = itemsList
+			
+			local itemsLayout = Utils:CreateListLayout(itemsList, 2)
+			Utils:AddPadding(itemsList, 5)
+			
+			-- Обновление размера списка
+			itemsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+				local contentHeight = itemsLayout.AbsoluteContentSize.Y + 10
+				local maxHeight = 200
+				itemsList.Size = UDim2.new(1, 0, 0, math.min(contentHeight, maxHeight))
+				itemsList.CanvasSize = UDim2.new(0, 0, 0, contentHeight)
+				dropdownContainer.Size = UDim2.new(1, 0, 0, MobileConfig.button_height + (isOpen and math.min(contentHeight, maxHeight) + 5 or 0))
+			end)
+			
+			local function toggleDropdown()
+				isOpen = not isOpen
+				itemsList.Visible = isOpen
+				Utils:Tween(arrow, {Rotation = isOpen and 180 or 0}, 0.2)
+				
+				if isOpen then
+					local contentHeight = itemsLayout.AbsoluteContentSize.Y + 10
+					Utils:Tween(dropdownContainer, {Size = UDim2.new(1, 0, 0, MobileConfig.button_height + math.min(contentHeight, 200) + 5)}, 0.3)
+				else
+					Utils:Tween(dropdownContainer, {Size = UDim2.new(1, 0, 0, MobileConfig.button_height)}, 0.3)
+				end
+			end
+			
+			local buttonTouch = TouchHandler.new(dropdownButton)
+			buttonTouch.onTap = toggleDropdown
+			
+			-- Методы управления
+			local dropdownData = {}
+			
+			function dropdownData:Add(itemText)
+				local itemButton = Utils:CreateRoundedFrame(itemsList, MobileConfig.colors.secondary,
+					UDim2.new(1, 0, 0, 40))
+				
+				local itemLabel = Utils:CreateText(itemButton, itemText, 14, MobileConfig.colors.text, 
+					Enum.Font.GothamMedium, Enum.TextXAlignment.Center)
+				itemLabel.TextYAlignment = Enum.TextYAlignment.Center
+				
+				local itemTouch = TouchHandler.new(itemButton)
+				itemTouch.onTap = function()
+					selectedItem = itemText
+					dropdownLabel.Text = text .. ": " .. itemText
+					toggleDropdown()
+					if callback then callback(itemText) end
+				end
+				
+				return itemButton
+			end
+			
+			function dropdownData:Clear()
+				for _, child in pairs(itemsList:GetChildren()) do
+					if child:IsA("Frame") then
+						child:Destroy()
+					end
+				end
+			end
+			
+			function dropdownData:GetSelected()
+				return selectedItem
+			end
+			
+			-- Добавить начальные элементы
+			for _, item in pairs(items) do
+				dropdownData:Add(item)
+			end
+			
+			return dropdownData, dropdownContainer
+		end
+		
+		-- Разделитель
+		function tabData:AddSeparator()
+			local separator = Instance.new("Frame")
+			separator.BackgroundColor3 = MobileConfig.colors.border
+			separator.BorderSizePixel = 0
+			separator.Size = UDim2.new(1, 0, 0, 2)
+			separator.Parent = tabContent
+			
+			return separator
+		end
+		
+		-- Папка (складываемый раздел)
+		function tabData:AddFolder(folderName)
+			local folderData = {}
+			local isOpen = false
+			
+			local folderContainer = Instance.new("Frame")
+			folderContainer.BackgroundTransparency = 1
+			folderContainer.Size = UDim2.new(1, 0, 0, MobileConfig.button_height)
+			folderContainer.ClipsDescendants = false
+			folderContainer.Parent = tabContent
+			
+			-- Заголовок папки
+			local folderHeader = Utils:CreateRoundedFrame(folderContainer, MobileConfig.colors.surface,
+				UDim2.new(1, 0, 0, MobileConfig.button_height))
+			
+			Utils:AddPadding(folderHeader, MobileConfig.padding)
+			
+			local folderLabel = Instance.new("TextLabel")
+			folderLabel.Text = folderName
+			folderLabel.TextSize = 16
+			folderLabel.TextColor3 = MobileConfig.colors.text
+			folderLabel.Font = Enum.Font.GothamBold
+			folderLabel.BackgroundTransparency = 1
+			folderLabel.Size = UDim2.new(1, -40, 1, 0)
+			folderLabel.TextXAlignment = Enum.TextXAlignment.Left
+			folderLabel.TextYAlignment = Enum.TextYAlignment.Center
+			folderLabel.Parent = folderHeader
+			
+			-- Стрелка
+			local arrow = Utils:CreateText(folderHeader, "▶", 16, MobileConfig.colors.text_secondary, 
+				Enum.Font.GothamBold, Enum.TextXAlignment.Right)
+			arrow.Size = UDim2.new(0, 30, 1, 0)
+			arrow.Position = UDim2.new(1, -30, 0, 0)
+			arrow.TextYAlignment = Enum.TextYAlignment.Center
+			
+			-- Содержимое папки
+			local folderContent = Instance.new("Frame")
+			folderContent.BackgroundTransparency = 1
+			folderContent.Size = UDim2.new(1, 0, 0, 0)
+			folderContent.Position = UDim2.new(0, 0, 0, MobileConfig.button_height + 5)
+			folderContent.Visible = false
+			folderContent.Parent = folderContainer
+			
+			local folderContentLayout = Utils:CreateListLayout(folderContent, MobileConfig.element_spacing)
+			Utils:AddPadding(folderContent, 10)
+			
+			folderContentLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+				local contentHeight = folderContentLayout.AbsoluteContentSize.Y + 20
+				folderContent.Size = UDim2.new(1, 0, 0, contentHeight)
+				
+				if isOpen then
+					folderContainer.Size = UDim2.new(1, 0, 0, MobileConfig.button_height + contentHeight + 5)
+				end
+			end)
+			
+			local function toggleFolder()
+				isOpen = not isOpen
+				folderContent.Visible = isOpen
+				Utils:Tween(arrow, {Rotation = isOpen and 90 or 0}, 0.2)
+				
+				if isOpen then
+					local contentHeight = folderContentLayout.AbsoluteContentSize.Y + 20
+					Utils:Tween(folderContainer, {Size = UDim2.new(1, 0, 0, MobileConfig.button_height + contentHeight + 5)}, 0.3)
+				else
+					Utils:Tween(folderContainer, {Size = UDim2.new(1, 0, 0, MobileConfig.button_height)}, 0.3)
+				end
+			end
+			
+			local headerTouch = TouchHandler.new(folderHeader)
+			headerTouch.onTap = toggleFolder
+			
+			-- Копируем все методы из tabData в folderData
+			for methodName, method in pairs(tabData) do
+				folderData[methodName] = function(self, ...)
+					local result, element = method(self, ...)
+					if element then
+						element.Parent = folderContent
+					end
+					return result, element
+				end
+			end
+			
+			return folderData, folderContainer
+		end
+		
+		return tabData, tabContent
+	end
+	
+	-- Показать окно
+	function windowData:Show()
+		window.Visible = true
+		window.Position = UDim2.new(0.5, -windowWidth/2, 1.5, 0)
+		Utils:Tween(window, {Position = UDim2.new(0.5, -windowWidth/2, 0.5, -windowHeight/2)}, 0.4)
+	end
+	
+	-- Скрыть окно
+	function windowData:Hide()
+		Utils:Tween(window, {Position = UDim2.new(0.5, -windowWidth/2, 1.5, 0)}, 0.4, function()
+			window.Visible = false
+		end)
+	end
+	
+	-- Переключить видимость
+	function windowData:Toggle()
+		if window.Visible then
+			windowData:Hide()
+		else
+			windowData:Show()
+		end
+	end
+	
+	return windowData, window
+end
+
+return MobileUI
